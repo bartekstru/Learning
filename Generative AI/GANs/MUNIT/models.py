@@ -32,7 +32,34 @@ class AdaptiveInstanceNorm2d(nn.Module):
         return out.view(1, b*c, *x.size()[2:])
     
 class LayerNorm(nn.Module):
-    pass
+    
+    def __init__(self, num_features, affine, eps):
+        super().__init__()
+        self.num_features = num_features
+        self.affine = affine
+        self.eps = eps
+
+        if self.affine:
+            self.gamma = nn.Parameter(torch.Tensor(num_features).uniform_())
+            self.beta = nn.Parameter(torch.zeros())
+
+    def forward(self, x):
+        shape = [1] + [1] * (x.dim() - 1)
+
+        if x.size(0) == 1:
+            mean = x.view(-1).mean().view(*shape)
+            std = x.view(-1).std().view(*shape)
+        else:
+            mean = x.view(x.shape[0], -1).mean().view(*shape)
+            std = x.view(x.shape[0], -1).std().view(*shape)
+
+        x = (x - mean) / (std + self.eps) # B, C, H, W
+
+        if self.affine:
+            shape = [1,-1] + [1] * (x.dim() - 2) # 1, C, 1, 1
+            x = x * self.gamma.view(*shape) + x.beta.view(*shape)
+        return x
+    
 
 #################################################################################
 # Basic Blocks
