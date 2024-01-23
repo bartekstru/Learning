@@ -499,7 +499,50 @@ class AdaINGenerator(nn.Module):
 
 
 class Discriminator(nn.Module):
-    pass
+    # MultiScale Image Discriminator
+    def __init__(self, base_channels, n_layers, n_scales, norm, activ, pad_type):
+        super().__init__()
+
+        self.discriminators = nn.ModuleList([
+            self._make_patchgan_discriminator(3, base_channels, n_layers, norm, activ, pad_type ) for _ in range(n_scales)
+        ])
+
+        self.downsample = nn.AvgPool2d(3, stride=2, padding=1, count_include_pad=False)
+
+    def _make_patchgan_discriminator(self, input_channels, base_channels, n_layers, norm, activ, pad_type):
+        cnns = []
+        channels = base_channels
+        cnns += [Conv2dBlock(input_channels, channels, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
+        for _ in range(n_layers - 1):
+            cnns += [Conv2dBlock(channels, channels * 2, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
+            channels *= 2
+        cnss += [nn.Conv2d(channels, 1, 1, 1, 0)]
+        return nn.Sequential(*cnns)
+    
+    def forward(self, x):
+        outputs = []
+        for disc in self.discriminators:
+            outputs.append(disc(x))
+            x = self.downsample(x)
+        return outputs
+    
+    def calc_disc_loss(self, input_real, input_fake):
+        outputs_real = self.forward(input_real)
+        outputs_fake = self.forward(input_fake)
+        loss = 0
+
+        for _, (out_real, out_fake) in enumerate(outputs_real, outputs_fake):
+            loss += torch.mean((out_real - 1)**2) + torch.mean((out_fake - 0)**2)        
+        
+        return loss
+    
+    def calc_gen_loss(self, input_fake):
+        outputs_fake = self.forward(input_fake)
+        loss = 0
+        for _, (out_fake) in enumerate(outputs_fake):
+            loss += torch.mean((out_fake - 1)**2)
+        return loss
+
 
 
 
@@ -518,17 +561,14 @@ class MUNIT(nn.Module):
     ):
         super().__init__()
 
-        self.gen_a = AdaINGenerator()
-
         self.gen_a = AdaINGenerator(
             base_channels=gen_channels, n_c_downsample=n_c_downsample, n_s_downsample=n_s_downsample, n_res_blocks=n_res_blocks, s_dim=s_dim, h_dim=h_dim,
         )
-        self.gen_b = Generator(
+        self.gen_b = AdaINGenerator(
             base_channels=gen_channels, n_c_downsample=n_c_downsample, n_s_downsample=n_s_downsample, n_res_blocks=n_res_blocks, s_dim=s_dim, h_dim=h_dim,
         )
-        self.dis_a = Discriminator(
-            base_channels=dis_channels, n_layers=n_layers, n_discriminators=n_discriminators,
-        )
+
+        self.dis_a = Discriminator(input_channels=3, )
         self.dis_b = Discriminator(
             base_channels=dis_channels, n_layers=n_layers, n_discriminators=n_discriminators,
         )
